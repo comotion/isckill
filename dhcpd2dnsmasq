@@ -1,0 +1,102 @@
+#!/usr/bin/perl 
+#
+# QnD xlate ISC dhcpd to dnsmasq
+# 2009-11-04 KWY
+
+my $pat_ip = '\d+\.\d+\.\d+\.\d+';
+my ($net_name, $subnet, $netmask,
+   $net_from, $net_to,
+	$router, $dns, $range_bootp, 
+	$tftp, $tftp_file,
+	$lease, $lease_max);
+
+$net_name = 'default';
+
+sub sanitize_host {
+	my $host = shift;
+	$host =~ /^([\w-_]*)/;
+	$host = $1;
+	return $host;
+}
+
+sub read_host {
+	my $host = shift;
+	$host = sanitize_host($host);
+	my ($ip, $mac, $dns, $tftp, $filename, $router);
+	while(<STDIN>){
+		/^\s*#/ and next; # ignore comments
+	# the host definition may end on same line.
+		/hardware ethernet ([^;]*)/ and
+			$mac = $1 or
+		/fixed-address ($pat_ip)/ and
+			$ip = $1 or
+		/option routers ([^;]*)/ and
+			$router = $1 and
+			print "dhcp-option=host:$host, option:router,$router\n" or
+		/option domain-name-servers ([^;]*)/ and
+			$dns = $1 and print "server=host:$host, $dns\n" or
+		/next-server ($pat_ip)/ and
+			$tftp = $1 or
+		/filename "([^"]*)"/ and
+			$filename = $1 or
+		/}/ and last;
+	}
+	print "dhcp-host=";
+	print "$mac," if $mac;
+	print "$host";
+	print ",$ip" if $ip;
+	print "\n";
+   print "dhcp-boot=host:$host, $filename,$tftp\n" if $tftp;
+	return 1; #gotta give something true
+}
+
+sub read_subnet {
+	my $subnet = shift;
+	while(<STDIN>){
+		/range ([\w-]*) ($pat_ip) ($pat_ip)/ and
+			$net_from = $2 and $net_to = $3 and
+		/option routers ([^;]*)/ and
+			$router = $1 and 
+			print "dhcp-option=net:$net_name, option:router,$router\n" or
+		/option domain-name-servers ([^;]*)/ and
+			$dns = $1 and print "server=$dns\n" or
+		/next-server ($pat_ip)/ and
+			$tftp = $1 or
+		/filename "([^"]*)"/ and
+			$filename = $1 or
+		/default-lease-time (\d*)/ and
+			$lease = $1 or
+		/max-lease-time (\d*)/ and
+			$lease_max = $1 and print "dhcp-lease-max=$lease_max\n" or
+		/host ([^ ]*) / and
+			$host = $1 and read_host($host) and next or
+		/}/ and last;
+	}
+	print "dhcp-range=$net_name,$net_from,$net_to,$lease\n";
+	print "dhcp-boot=net:$net_name , $filename,$tftp\n" if $tftp;
+}
+
+
+sub read_net {
+	my $net_name = shift;
+	while(<STDIN>){
+		/^\s*#/ and next; # ignore comments
+		/subnet ($pat_ip) netmask ($pat_ip)/ and
+			$subnet = $1 and $netmask = $2 and
+			print "# name: $net_name ip: $subnet mask: $netmask\n" and
+			read_subnet($subnet) or
+		/}/ and last;
+	}
+	return 1;
+
+}
+my %dhcp;
+while(<>){
+		/^\s*#/ and next; # ignore comments
+		/shared-network ([^\s]*)/ and
+			$net_name = $1 and read_net($net_name)
+}
+
+
+
+
